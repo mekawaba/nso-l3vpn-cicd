@@ -277,36 +277,30 @@ class NsoCiLibrary:
     # 4. service package
     # ------------------------------------------------------------------
     @keyword("Install Service Package")
-    def install_service_package(self, package_dir, timeout=300):
-        src = Path(package_dir).resolve()
-        staging = self.workdir / "build" / src.name
-        shutil.copytree(src, staging, ignore=shutil.ignore_patterns(
-            "load-dir", "__pycache__", "*.pyc"))
-
-        # ncsc is executable by the image's nso user only, so build as that user
-        # in a scratch copy that both the runner and the container can write.
-        for path in [staging, *staging.rglob("*")]:
-            extra = 0o777 if path.is_dir() else 0o666
-            path.chmod(path.stat().st_mode | extra)
-        build = self._run(["docker", "run", "--rm", "-v", f"{staging}:/pkg",
-                           "--entrypoint", "sh", self.image, "-c",
-                           "umask 000 && make -C /pkg/src clean all"])
-        logger.info("Package build:\n" + build)
-        self._save("package_build.txt", build)
+    def install_service_package(self, package_tarball, timeout=300):
+        src = Path(package_tarball).resolve()
+        if not src.is_file():
+            raise AssertionError(f"Package tarball not found: {src} "
+                                 "(build it with ci/build_package.sh)")
+        with tarfile.open(src) as tar:
+            top = {m.name.split("/")[0] for m in tar.getmembers()}
+        if len(top) != 1:
+            raise AssertionError(f"Unexpected package tarball layout: {top}")
+        name = top.pop()
 
         # The running NSO container owns the bind-mounted packages dir, so the
         # runner user cannot write there; install as root and hand it to nso.
         self._run(["docker", "run", "--rm", "-u", "root",
-                   "-v", f"{staging}:/src:ro", "-v", f"{self.packages_dir}:/dst",
+                   "-v", f"{src.parent}:/src:ro", "-v", f"{self.packages_dir}:/dst",
                    "--entrypoint", "sh", self.image, "-c",
-                   f"rm -rf /dst/{src.name} && cp -r /src /dst/{src.name}"
-                   f" && chown -R nso:nso /dst/{src.name}"])
+                   f"rm -rf /dst/{name} /dst/{name}-*.tar.gz"
+                   f" && cp /src/{src.name} /dst/ && chown nso:nso /dst/{src.name}"])
 
         out = self._cli(["packages reload"])
         self._save("packages_reload.txt", out)
-        if not re.search(rf"package {re.escape(src.name)}\s+result true", out):
-            raise AssertionError(f"packages reload failed for {src.name}:\n{out}")
-        self.wait_for_package_up(src.name, timeout)
+        if not re.search(rf"package {re.escape(name)}\s+result true", out):
+            raise AssertionError(f"packages reload failed for {name}:\n{out}")
+        self.wait_for_package_up(name, timeout)
 
     # ------------------------------------------------------------------
     # 5-7. service
