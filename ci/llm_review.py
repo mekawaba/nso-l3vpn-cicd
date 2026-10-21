@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-"""Ask Claude to review the NSO-generated L3VPN config and fail CI on bugs.
+"""Ask Cisco Circuit LLM to review the NSO-generated L3VPN config and fail CI on bugs.
 
 Exit code is 0 only when the last non-empty line of the answer is exactly
 "STATUS: PASSED". Anything else (FAILED, missing status, API error) exits 1.
 
 Environment:
-  ANTHROPIC_API_KEY   API key (GitHub Actions secret)
-  ANTHROPIC_MODEL     model id (default: claude-opus-5-5)
-  GITHUB_STEP_SUMMARY written by GitHub Actions when set
+  CIRCUIT_CLIENT_ID      Cisco OAuth2 client ID (GitHub Actions secret)
+  CIRCUIT_CLIENT_SECRET  Cisco OAuth2 client secret (GitHub Actions secret)
+  CIRCUIT_APP_KEY        Circuit app key (GitHub Actions secret)
+  CIRCUIT_MODEL          Circuit model / deployment name (default: gpt-4o)
+  GITHUB_STEP_SUMMARY    written by GitHub Actions when set
 """
 
 import argparse
+import json
 import os
 import re
 import sys
 from pathlib import Path
 
-DEFAULT_MODEL = "claude-opus-5-5"
+CISCO_OAUTH_URL = "https://id.cisco.com/oauth2/default/v1/token"
+CIRCUIT_ENDPOINT = "https://chat-ai.cisco.com"
+CIRCUIT_API_VERSION = "2024-08-01-preview"
+DEFAULT_MODEL = "gpt-4o"
+REQUIRED_ENV = ("CIRCUIT_CLIENT_ID", "CIRCUIT_CLIENT_SECRET", "CIRCUIT_APP_KEY")
 STATUS_RE = re.compile(r"^STATUS:\s*(PASSED|FAILED)$")
 
 PACKAGE_FILES = [
@@ -118,6 +125,23 @@ def parse_status(text):
     return match.group(1) if match else None
 
 
+def get_access_token(client_id, client_secret):
+    import requests
+
+    response = requests.post(
+        CISCO_OAUTH_URL,
+        auth=(client_id, client_secret),
+        headers={"Accept": "*/*", "Content-Type": "application/x-www-form-urlencoded"},
+        data="grant_type=client_credentials",
+        timeout=60,
+    )
+    response.raise_for_status()
+    token = response.json().get("access_token")
+    if not token:
+        raise ValueError("No access_token in OAuth2 response")
+    return token
+
+
 def write_report(output, model, status, answer):
     verdict = {"PASSED": "✅ PASSED", "FAILED": "❌ FAILED"}.get(status, "⚠️ UNKNOWN (fail-closed)")
     report = (f"<!-- nso-llm-review -->\n"
@@ -146,28 +170,34 @@ def main():
         print(SYSTEM_PROMPT + "\n\n" + prompt)
         return 0
 
-    model = os.environ.get("ANTHROPIC_MODEL") or DEFAULT_MODEL
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        print("::error::ANTHROPIC_API_KEY is not set", file=sys.stderr)
-        write_report(args.output, model, None, "ANTHROPIC_API_KEY が設定されていません。")
+    model = os.environ.get("CIRCUIT_MODEL") or DEFAULT_MODEL
+    missing = [name for name in REQUIRED_ENV if not os.environ.get(name)]
+    if missing:
+        print(f"::error::{', '.join(missing)} not set", file=sys.stderr)
+        write_report(args.output, model, None, f"{', '.join(missing)} が設定されていません。")
         return 1
 
-    import anthropic
+    import openai
+    import requests
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
+        token = get_access_token(os.environ["CIRCUIT_CLIENT_ID"],
+                                 os.environ["CIRCUIT_CLIENT_SECRET"])
+        client = openai.AzureOpenAI(azure_endpoint=CIRCUIT_ENDPOINT, api_key=token,
+                                    api_version=CIRCUIT_API_VERSION)
+        response = client.chat.completions.create(
             model=model,
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "system", "content": SYSTEM_PROMPT},
+                      {"role": "user", "content": prompt}],
+            user=json.dumps({"appkey": os.environ["CIRCUIT_APP_KEY"]}),
         )
-    except anthropic.APIError as exc:
-        print(f"::error::Claude API call failed: {exc}", file=sys.stderr)
-        write_report(args.output, model, None, f"Claude API の呼び出しに失敗しました: `{exc}`")
+    except (requests.RequestException, openai.OpenAIError, ValueError) as exc:
+        print(f"::error::Circuit API call failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        write_report(args.output, model, None,
+                     f"Circuit API の呼び出しに失敗しました: `{type(exc).__name__}: {exc}`")
         return 1
 
-    answer = "".join(block.text for block in response.content if block.type == "text")
+    answer = response.choices[0].message.content or ""
     status = parse_status(answer)
     write_report(args.output, model, status, answer)
     print(answer)

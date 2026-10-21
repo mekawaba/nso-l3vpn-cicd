@@ -30,7 +30,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Python 環境の準備 (Robot Framework / pyATS / Anthropic SDK)
+      - name: Python 環境の準備 (Robot Framework / pyATS / OpenAI SDK)
         run: |
           VENV="$HOME/.cache/nso-ci-venv/$(sha256sum ci/requirements.txt | cut -c1-12)"
           if [ ! -x "$VENV/bin/python" ]; then
@@ -50,10 +50,12 @@ jobs:
                 --variable ARTIFACTS_DIR:${{ github.workspace }}/artifacts \
                 tests/robot/l3vpn_ci.robot
 
-      - name: LLM レビュー (Claude)
+      - name: LLM レビュー (Cisco Circuit)
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          CIRCUIT_CLIENT_ID: ${{ secrets.CIRCUIT_CLIENT_ID }}
+          CIRCUIT_CLIENT_SECRET: ${{ secrets.CIRCUIT_CLIENT_SECRET }}
+          CIRCUIT_APP_KEY: ${{ secrets.CIRCUIT_APP_KEY }}
+          CIRCUIT_MODEL: ${{ vars.CIRCUIT_MODEL }}
         run: |
           python ci/llm_review.py \
             --package-dir packages/l3vpn \
