@@ -41,8 +41,22 @@ jobs:
           echo "$VENV/bin" >> "$GITHUB_PATH"
           echo "NSO_CI_WORKDIR=$HOME/nso-ci-work/$NSO_CI_ID" >> "$GITHUB_ENV"
 
-      - name: NSO イメージの確認
-        run: docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}'
+      - name: 必要な設定 (Secrets / Variables / NSO イメージ) の確認
+        env:
+          HAS_CIRCUIT_CLIENT_ID: ${{ secrets.CIRCUIT_CLIENT_ID != '' }}
+          HAS_CIRCUIT_CLIENT_SECRET: ${{ secrets.CIRCUIT_CLIENT_SECRET != '' }}
+          HAS_CIRCUIT_APP_KEY: ${{ secrets.CIRCUIT_APP_KEY != '' }}
+        run: |
+          ok=true
+          [ -n "$NSO_NED_TARBALL" ] || { echo "::error::Repository variable NSO_NED_TARBALL is not set"; ok=false; }
+          [ -z "$NSO_NED_TARBALL" ] || [ -f "$NSO_NED_TARBALL" ] || { echo "::error::NED tarball not found on runner: $NSO_NED_TARBALL"; ok=false; }
+          [ -n "$NETSIM_USERNAME" ] || { echo "::error::Repository secret NETSIM_USERNAME is not set"; ok=false; }
+          [ -n "$NETSIM_PASSWORD" ] || { echo "::error::Repository secret NETSIM_PASSWORD is not set"; ok=false; }
+          for s in CIRCUIT_CLIENT_ID CIRCUIT_CLIENT_SECRET CIRCUIT_APP_KEY; do
+            v="HAS_$s"; [ "${!v}" = "true" ] || { echo "::error::Repository secret $s is not set"; ok=false; }
+          done
+          docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}' || { echo "::error::Docker image $NSO_IMAGE not found on runner"; ok=false; }
+          $ok
 
       - name: Robot Framework テスト (NSO 起動 〜 show run 確認)
         run: |
