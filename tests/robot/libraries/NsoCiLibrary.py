@@ -279,20 +279,28 @@ class NsoCiLibrary:
     @keyword("Install Service Package")
     def install_service_package(self, package_dir, timeout=300):
         src = Path(package_dir).resolve()
-        dst = self.packages_dir / src.name
-        shutil.copytree(src, dst, ignore=shutil.ignore_patterns(
+        staging = self.workdir / "build" / src.name
+        shutil.copytree(src, staging, ignore=shutil.ignore_patterns(
             "load-dir", "__pycache__", "*.pyc"))
 
         # ncsc is executable by the image's nso user only, so build as that user
         # in a scratch copy that both the runner and the container can write.
-        for path in [dst, *dst.rglob("*")]:
+        for path in [staging, *staging.rglob("*")]:
             extra = 0o777 if path.is_dir() else 0o666
             path.chmod(path.stat().st_mode | extra)
-        build = self._run(["docker", "run", "--rm", "-v", f"{dst}:/pkg",
+        build = self._run(["docker", "run", "--rm", "-v", f"{staging}:/pkg",
                            "--entrypoint", "sh", self.image, "-c",
                            "umask 000 && make -C /pkg/src clean all"])
         logger.info("Package build:\n" + build)
         self._save("package_build.txt", build)
+
+        # The running NSO container owns the bind-mounted packages dir, so the
+        # runner user cannot write there; install as root and hand it to nso.
+        self._run(["docker", "run", "--rm", "-u", "root",
+                   "-v", f"{staging}:/src:ro", "-v", f"{self.packages_dir}:/dst",
+                   "--entrypoint", "sh", self.image, "-c",
+                   f"rm -rf /dst/{src.name} && cp -r /src /dst/{src.name}"
+                   f" && chown -R nso:nso /dst/{src.name}"])
 
         out = self._cli(["packages reload"])
         self._save("packages_reload.txt", out)
