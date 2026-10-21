@@ -1,0 +1,14 @@
+name: Python 環境の準備
+description: Robot Framework / pyATS / OpenAI SDK の venv を requirements のハッシュ単位で再利用する
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        VENV="$HOME/.cache/nso-ci-venv/$(sha256sum ci/requirements.txt | cut -c1-12)"
+        if [ ! -x "$VENV/bin/python" ]; then
+          python3 -m venv "$VENV"
+          "$VENV/bin/pip" install -q --upgrade pip
+          "$VENV/bin/pip" install -q -r ci/requirements.txt
+        fi
+        echo "$VENV/bin" >> "$GITHUB_PATH"

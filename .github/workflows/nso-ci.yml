@@ -13,36 +13,24 @@ concurrency:
   group: nso-ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  NSO_IMAGE: ${{ vars.NSO_IMAGE || 'cisco-nso-prod:6.7' }}
+  NSO_NED_TARBALL: ${{ vars.NSO_NED_TARBALL }}
+  NSO_CI_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+
 jobs:
-  nso-test:
-    name: NSO 6.7 / netsim / Robot / LLM review
+  preflight:
+    name: preflight
     # Secrets and the self-hosted runner must never be exposed to fork PRs.
+    # Every other job depends on this one, so it gates the whole run.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux, nso]
-    timeout-minutes: 40
-    env:
-      NSO_IMAGE: ${{ vars.NSO_IMAGE || 'cisco-nso-prod:6.7' }}
-      NSO_NED_TARBALL: ${{ vars.NSO_NED_TARBALL }}
-      NSO_CI_ID: ${{ github.run_id }}-${{ github.run_attempt }}
-      NETSIM_USERNAME: ${{ secrets.NETSIM_USERNAME }}
-      NETSIM_PASSWORD: ${{ secrets.NETSIM_PASSWORD }}
+    timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Python 環境の準備 (Robot Framework / pyATS / OpenAI SDK)
-        run: |
-          VENV="$HOME/.cache/nso-ci-venv/$(sha256sum ci/requirements.txt | cut -c1-12)"
-          if [ ! -x "$VENV/bin/python" ]; then
-            python3 -m venv "$VENV"
-            "$VENV/bin/pip" install -q --upgrade pip
-            "$VENV/bin/pip" install -q -r ci/requirements.txt
-          fi
-          echo "$VENV/bin" >> "$GITHUB_PATH"
-          echo "NSO_CI_WORKDIR=$HOME/nso-ci-work/$NSO_CI_ID" >> "$GITHUB_ENV"
-
       - name: 必要な設定 (Secrets / Variables / NSO イメージ) の確認
         env:
+          HAS_NETSIM_USERNAME: ${{ secrets.NETSIM_USERNAME != '' }}
+          HAS_NETSIM_PASSWORD: ${{ secrets.NETSIM_PASSWORD != '' }}
           HAS_CIRCUIT_CLIENT_ID: ${{ secrets.CIRCUIT_CLIENT_ID != '' }}
           HAS_CIRCUIT_CLIENT_SECRET: ${{ secrets.CIRCUIT_CLIENT_SECRET != '' }}
           HAS_CIRCUIT_APP_KEY: ${{ secrets.CIRCUIT_APP_KEY != '' }}
@@ -50,21 +38,86 @@ jobs:
           ok=true
           [ -n "$NSO_NED_TARBALL" ] || { echo "::error::Repository variable NSO_NED_TARBALL is not set"; ok=false; }
           [ -z "$NSO_NED_TARBALL" ] || [ -f "$NSO_NED_TARBALL" ] || { echo "::error::NED tarball not found on runner: $NSO_NED_TARBALL"; ok=false; }
-          [ -n "$NETSIM_USERNAME" ] || { echo "::error::Repository secret NETSIM_USERNAME is not set"; ok=false; }
-          [ -n "$NETSIM_PASSWORD" ] || { echo "::error::Repository secret NETSIM_PASSWORD is not set"; ok=false; }
-          for s in CIRCUIT_CLIENT_ID CIRCUIT_CLIENT_SECRET CIRCUIT_APP_KEY; do
+          for s in NETSIM_USERNAME NETSIM_PASSWORD CIRCUIT_CLIENT_ID CIRCUIT_CLIENT_SECRET CIRCUIT_APP_KEY; do
             v="HAS_$s"; [ "${!v}" = "true" ] || { echo "::error::Repository secret $s is not set"; ok=false; }
           done
           docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}' || { echo "::error::Docker image $NSO_IMAGE not found on runner"; ok=false; }
           $ok
 
+  build:
+    name: build
+    needs: preflight
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 10
+    outputs:
+      artifact: l3vpn-package-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: サービスパッケージのビルド (NSO コンテナ内で make)
+        id: build
+        run: |
+          tarball=$(ci/build_package.sh packages/l3vpn "$HOME/nso-ci-work/$NSO_CI_ID-build" dist | tail -n 1)
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "### build: \`$(basename "$tarball")\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: ビルド済みパッケージのアップロード (後続ジョブ用)
+        uses: actions/upload-artifact@v4
+        with:
+          name: l3vpn-package-${{ github.run_id }}-${{ github.run_attempt }}-build
+          path: ${{ steps.build.outputs.tarball }}
+          retention-days: 1
+
+  test:
+    name: test (NSO 6.7 / netsim / Robot)
+    needs: build
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 30
+    env:
+      NETSIM_USERNAME: ${{ secrets.NETSIM_USERNAME }}
+      NETSIM_PASSWORD: ${{ secrets.NETSIM_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 環境の準備
+        uses: ./.github/actions/python-env
+
       - name: Robot Framework テスト (NSO 起動 〜 show run 確認)
         run: |
+          export NSO_CI_WORKDIR="$HOME/nso-ci-work/$NSO_CI_ID"
           robot --outputdir artifacts/robot --exitonfailure \
                 --variable ARTIFACTS_DIR:${{ github.workspace }}/artifacts \
                 tests/robot/l3vpn_ci.robot
 
-      - name: LLM レビュー (Cisco Circuit)
+      - name: テスト結果のアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nso-ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          retention-days: 14
+
+  llm-review:
+    name: llm-review (Cisco Circuit)
+    needs: test
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 環境の準備
+        uses: ./.github/actions/python-env
+
+      - name: テスト結果のダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: nso-ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+
+      - name: LLM レビュー
         env:
           CIRCUIT_CLIENT_ID: ${{ secrets.CIRCUIT_CLIENT_ID }}
           CIRCUIT_CLIENT_SECRET: ${{ secrets.CIRCUIT_CLIENT_SECRET }}
@@ -95,20 +148,48 @@ jobs:
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
 
-      - name: テスト成果物のアップロード
-        if: always()
+      - name: レビュー結果のアップロード
+        if: always() && hashFiles('artifacts/llm_review.md') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: nso-ci-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
-          path: artifacts/
+          name: llm-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/llm_review.md
           retention-days: 14
 
-      - name: 後片付け (コンテナ削除)
-        if: always()
+  deliver-package:
+    name: deliver-package
+    # Only a package that passed both the Robot tests and the LLM review is delivered.
+    needs: [build, llm-review]
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 5
+    steps:
+      - name: ビルド済みパッケージのダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}-build
+          path: dist/
+
+      - name: レビュー済みパッケージのアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: dist/*.tar.gz
+          retention-days: 14
+
+  cleanup:
+    name: cleanup
+    if: always() && needs.preflight.result != 'skipped'
+    needs: [preflight, build, test, llm-review, deliver-package]
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 5
+    steps:
+      - name: 後片付け (コンテナ・作業ディレクトリ削除)
         run: |
           docker ps -aq --filter "name=nso-ci-${NSO_CI_ID}-" | xargs -r docker rm -f
           docker network ls -q --filter "name=nso-ci-${NSO_CI_ID}-" | xargs -r docker network rm
-          if [ -n "${NSO_CI_WORKDIR:-}" ] && [ -d "$NSO_CI_WORKDIR" ]; then
-            docker run --rm -u root -v "$NSO_CI_WORKDIR:/w" --entrypoint sh "$NSO_IMAGE" -c 'rm -rf /w/* /w/.[!.]*'
-            rm -rf "$NSO_CI_WORKDIR"
-          fi
+          for dir in "$HOME/nso-ci-work/$NSO_CI_ID" "$HOME/nso-ci-work/$NSO_CI_ID-build"; do
+            if [ -d "$dir" ]; then
+              docker run --rm -u root -v "$dir:/w" --entrypoint sh "$NSO_IMAGE" -c 'rm -rf /w/* /w/.[!.]*'
+              rm -rf "$dir"
+            fi
+          done
