@@ -1,0 +1,4 @@
+robotframework==7.5
+pyats[library]==26.9
+anthropic==1.17.0
+PyYAML==6.0.3

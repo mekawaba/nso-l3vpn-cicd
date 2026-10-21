@@ -1,0 +1,30 @@
+# Input parameters used by the CI test. This file is also passed to the LLM
+# review as the "intent" of the service; it is NOT an expected-config file.
+
+# Prerequisite (underlay) config applied by the test harness before the
+# service package is installed.
+prerequisites:
+  bgp-as: 65000
+  devices:
+    - name: PE-1
+      loopback0: 10.255.255.1
+    - name: PE-2
+      loopback0: 10.255.255.2
+
+# l3vpn service instance applied through NSO.
+service:
+  name: CUST-A
+  bgp-as: 65000
+  route-target: "65000:100"
+  pe1:
+    device: PE-1
+    interface: 0/0/0/1
+    ip-address: 192.168.11.1
+    prefix-length: 24
+    rd: "65000:1"
+  pe2:
+    device: PE-2
+    interface: 0/0/0/1
+    ip-address: 192.168.12.1
+    prefix-length: 24
+    rd: "65000:2"

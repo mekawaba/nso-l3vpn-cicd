@@ -1,0 +1,98 @@
+name: NSO L3VPN CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: nso-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  nso-test:
+    name: NSO 6.7 / netsim / Robot / LLM review
+    # Secrets and the self-hosted runner must never be exposed to fork PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 40
+    env:
+      NSO_IMAGE: ${{ vars.NSO_IMAGE || 'cisco-nso-prod:6.7' }}
+      NSO_NED_TARBALL: ${{ vars.NSO_NED_TARBALL }}
+      NSO_CI_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      NETSIM_USERNAME: ${{ secrets.NETSIM_USERNAME }}
+      NETSIM_PASSWORD: ${{ secrets.NETSIM_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python 環境の準備 (Robot Framework / pyATS / Anthropic SDK)
+        run: |
+          VENV="$HOME/.cache/nso-ci-venv/$(sha256sum ci/requirements.txt | cut -c1-12)"
+          if [ ! -x "$VENV/bin/python" ]; then
+            python3 -m venv "$VENV"
+            "$VENV/bin/pip" install -q --upgrade pip
+            "$VENV/bin/pip" install -q -r ci/requirements.txt
+          fi
+          echo "$VENV/bin" >> "$GITHUB_PATH"
+          echo "NSO_CI_WORKDIR=$HOME/nso-ci-work/$NSO_CI_ID" >> "$GITHUB_ENV"
+
+      - name: NSO イメージの確認
+        run: docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}'
+
+      - name: Robot Framework テスト (NSO 起動 〜 show run 確認)
+        run: |
+          robot --outputdir artifacts/robot --exitonfailure \
+                --variable ARTIFACTS_DIR:${{ github.workspace }}/artifacts \
+                tests/robot/l3vpn_ci.robot
+
+      - name: LLM レビュー (Claude)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+        run: |
+          python ci/llm_review.py \
+            --package-dir packages/l3vpn \
+            --params tests/params/service_params.yaml \
+            --artifacts-dir artifacts \
+            --output artifacts/llm_review.md
+
+      - name: PR にレビュー結果をコメント
+        if: always() && github.event_name == 'pull_request' && hashFiles('artifacts/llm_review.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('artifacts/llm_review.md', 'utf8');
+            const marker = '<!-- nso-llm-review -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: テスト成果物のアップロード
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nso-ci-artifacts-${{ github.run_id }}-${{ github.run_attempt }}
+          path: artifacts/
+          retention-days: 14
+
+      - name: 後片付け (コンテナ削除)
+        if: always()
+        run: |
+          docker ps -aq --filter "name=nso-ci-${NSO_CI_ID}-" | xargs -r docker rm -f
+          docker network ls -q --filter "name=nso-ci-${NSO_CI_ID}-" | xargs -r docker network rm
+          if [ -n "${NSO_CI_WORKDIR:-}" ] && [ -d "$NSO_CI_WORKDIR" ]; then
+            docker run --rm -u root -v "$NSO_CI_WORKDIR:/w" --entrypoint sh "$NSO_IMAGE" -c 'rm -rf /w/* /w/.[!.]*'
+            rm -rf "$NSO_CI_WORKDIR"
+          fi

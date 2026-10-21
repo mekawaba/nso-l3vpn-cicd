@@ -1,0 +1,7 @@
+artifacts/
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+packages/*/load-dir/
+nso-ci-*/

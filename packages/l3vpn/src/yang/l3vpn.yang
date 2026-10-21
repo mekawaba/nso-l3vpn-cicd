@@ -1,0 +1,107 @@
+module l3vpn {
+  yang-version 1.1;
+  namespace "http://example.com/l3vpn";
+  prefix l3vpn;
+
+  import ietf-inet-types {
+    prefix inet;
+  }
+  import tailf-common {
+    prefix tailf;
+  }
+  import tailf-ncs {
+    prefix ncs;
+  }
+
+  description
+    "L3VPN service connecting two IOS XR PE routers with one VRF.";
+
+  revision 2026-10-21 {
+    description
+      "Remove color. Parameterize BGP AS, RD and prefix length.
+       Model the two endpoints as pe1/pe2 containers.";
+  }
+  revision 2016-01-01 {
+    description
+      "Initial revision.";
+  }
+
+  typedef rd-rt-type {
+    type string {
+      pattern '[0-9]+(\.[0-9]+){0,3}:[0-9]+';
+    }
+    description
+      "Route distinguisher / route target in ASN:NN or IPv4:NN format.";
+  }
+
+  grouping pe-endpoint {
+    leaf device {
+      tailf:info "PE router";
+      mandatory true;
+      type leafref {
+        path "/ncs:devices/ncs:device/ncs:name";
+      }
+    }
+    leaf interface {
+      tailf:info "GigabitEthernet interface id facing the CE (e.g. 0/0/0/1)";
+      mandatory true;
+      type string {
+        pattern '[0-9]+/[0-9]+/[0-9]+/[0-9]+';
+      }
+    }
+    leaf ip-address {
+      tailf:info "PE address on the CE-facing interface";
+      mandatory true;
+      type inet:ipv4-address;
+    }
+    leaf prefix-length {
+      tailf:info "Prefix length of the CE-facing subnet";
+      type uint8 {
+        range "8..30";
+      }
+      default 24;
+    }
+    leaf rd {
+      tailf:info "Route distinguisher of the VRF on this PE";
+      mandatory true;
+      type rd-rt-type;
+    }
+  }
+
+  list l3vpn {
+    description "L3VPN service between two PE routers";
+
+    key name;
+    leaf name {
+      tailf:info "VRF name / unique service id";
+      type string {
+        pattern '[A-Za-z0-9_-]+';
+      }
+    }
+
+    uses ncs:service-data;
+    ncs:servicepoint l3vpn-servicepoint;
+
+    must "pe1/device != pe2/device" {
+      error-message "pe1 and pe2 must be different devices.";
+    }
+
+    leaf bgp-as {
+      tailf:info "BGP AS number configured on the PE routers";
+      mandatory true;
+      type inet:as-number;
+    }
+    leaf route-target {
+      tailf:info "Route target imported and exported on both PEs";
+      mandatory true;
+      type rd-rt-type;
+    }
+
+    container pe1 {
+      uses pe-endpoint;
+    }
+    container pe2 {
+      uses pe-endpoint;
+    }
+  }
+}

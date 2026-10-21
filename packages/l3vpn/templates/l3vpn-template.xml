@@ -1,0 +1,135 @@
+<config-template xmlns="http://tail-f.com/ns/config/1.0">
+  <devices xmlns="http://tail-f.com/ns/ncs">
+    <!-- PE1 -->
+    <device>
+      <name>{/pe1/device}</name>
+      <config>
+        <vrf xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <vrf-list>
+            <name>{/name}</name>
+            <address-family>
+              <ipv4>
+                <unicast>
+                  <import>
+                    <route-target>
+                      <address-list>
+                        <name>{/route-target}</name>
+                      </address-list>
+                    </route-target>
+                  </import>
+                  <export>
+                    <route-target>
+                      <address-list>
+                        <name>{/route-target}</name>
+                      </address-list>
+                    </route-target>
+                  </export>
+                </unicast>
+              </ipv4>
+            </address-family>
+          </vrf-list>
+        </vrf>
+        <interface xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <GigabitEthernet>
+            <id>{/pe1/interface}</id>
+            <description>L3VPN:{/name}</description>
+            <vrf>{/name}</vrf>
+            <ipv4>
+              <address>
+                <ip>{/pe1/ip-address}</ip>
+                <mask>{$PE1_MASK}</mask>
+              </address>
+            </ipv4>
+            <shutdown tags="delete"/>
+          </GigabitEthernet>
+        </interface>
+        <router xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <bgp>
+            <bgp-no-instance>
+              <id>{/bgp-as}</id>
+              <vrf>
+                <name>{/name}</name>
+                <rd>{/pe1/rd}</rd>
+                <address-family>
+                  <ipv4>
+                    <unicast>
+                      <redistribute>
+                        <connected/>
+                      </redistribute>
+                    </unicast>
+                  </ipv4>
+                </address-family>
+              </vrf>
+            </bgp-no-instance>
+          </bgp>
+        </router>
+      </config>
+    </device>
+
+    <!-- PE2 -->
+    <device>
+      <name>{/pe2/device}</name>
+      <config>
+        <vrf xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <vrf-list>
+            <name>{/name}</name>
+            <address-family>
+              <ipv4>
+                <unicast>
+                  <import>
+                    <route-target>
+                      <address-list>
+                        <name>{/route-target}</name>
+                      </address-list>
+                    </route-target>
+                  </import>
+                  <export>
+                    <route-target>
+                      <address-list>
+                        <name>{/route-target}</name>
+                      </address-list>
+                    </route-target>
+                  </export>
+                </unicast>
+              </ipv4>
+            </address-family>
+          </vrf-list>
+        </vrf>
+        <interface xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <GigabitEthernet>
+            <id>{/pe2/interface}</id>
+            <description>L3VPN:{/name}</description>
+            <vrf>{/name}</vrf>
+            <ipv4>
+              <address>
+                <ip>{/pe2/ip-address}</ip>
+                <mask>{$PE2_MASK}</mask>
+              </address>
+            </ipv4>
+            <shutdown tags="delete"/>
+          </GigabitEthernet>
+        </interface>
+        <router xmlns="http://tail-f.com/ned/cisco-ios-xr">
+          <bgp>
+            <bgp-no-instance>
+              <id>{/bgp-as}</id>
+              <vrf>
+                <name>{/name}</name>
+                <rd>{/pe2/rd}</rd>
+                <address-family>
+                  <ipv4>
+                    <unicast>
+                      <redistribute>
+                        <connected/>
+                      </redistribute>
+                    </unicast>
+                  </ipv4>
+                </address-family>
+              </vrf>
+            </bgp-no-instance>
+          </bgp>
+        </router>
+      </config>
+    </device>
+  </devices>
+</config-template>
