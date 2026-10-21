@@ -63,6 +63,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       artifact: l3vpn-package-${{ github.run_id }}-${{ github.run_attempt }}
+      tarball: ${{ steps.build.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -72,6 +73,7 @@ jobs:
         run: |
           tarball=$(ci/build_package.sh packages/l3vpn "$HOME/nso-ci-work/$NSO_CI_ID-build" dist | tail -n 1)
           echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          echo "name=$(basename "$tarball")" >> "$GITHUB_OUTPUT"
           echo "### build: \`$(basename "$tarball")\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: ビルド済みパッケージのアップロード (後続ジョブ用)
@@ -96,11 +98,18 @@ jobs:
       - name: Python 環境の準備
         uses: ./.github/actions/python-env
 
+      - name: ビルド済みパッケージのダウンロード
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact }}-build
+          path: dist/
+
       - name: Robot Framework テスト (NSO 起動 〜 show run 確認)
         run: |
           export NSO_CI_WORKDIR="$HOME/nso-ci-work/$NSO_CI_ID"
           robot --outputdir artifacts/robot --exitonfailure \
                 --variable ARTIFACTS_DIR:${{ github.workspace }}/artifacts \
+                --variable PACKAGE_TARBALL:${{ github.workspace }}/dist/${{ needs.build.outputs.tarball }} \
                 tests/robot/l3vpn_ci.robot
 
       - name: テスト結果のアップロード

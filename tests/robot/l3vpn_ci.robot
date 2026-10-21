@@ -8,7 +8,7 @@ Suite Teardown    NSO.Collect Logs And Cleanup
 *** Variables ***
 ${PARAMS_FILE}      ${CURDIR}/../params/service_params.yaml
 ${ARTIFACTS_DIR}    ${CURDIR}/../../artifacts
-${PACKAGE_DIR}      ${CURDIR}/../../packages/l3vpn
+${PACKAGE_TARBALL}    ${EMPTY}
 
 *** Test Cases ***
 01 NSOコンテナの起動
@@ -22,7 +22,7 @@ ${PACKAGE_DIR}      ${CURDIR}/../../packages/l3vpn
     NSO.Apply Prerequisite Config
 
 04 サービスパッケージのインストール
-    NSO.Install Service Package    ${PACKAGE_DIR}
+    NSO.Install Service Package    ${PACKAGE_TARBALL}
 
 05 サービスの適用 (パラメータ投入と validate)
     NSO.Apply Service And Validate
