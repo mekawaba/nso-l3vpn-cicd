@@ -44,6 +44,18 @@ jobs:
           docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}' || { echo "::error::Docker image $NSO_IMAGE not found on runner"; ok=false; }
           $ok
 
+  unit-test:
+    name: unit-test
+    needs: preflight
+    runs-on: [self-hosted, linux, nso]
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python unittest
+        run: python3 -m unittest discover -s tests/unit -v
+
   build:
     name: build
     needs: preflight
@@ -159,7 +171,7 @@ jobs:
   deliver-package:
     name: deliver-package
     # Only a package that passed both the Robot tests and the LLM review is delivered.
-    needs: [build, llm-review]
+    needs: [unit-test, build, llm-review]
     runs-on: [self-hosted, linux, nso]
     timeout-minutes: 5
     steps:
@@ -179,7 +191,7 @@ jobs:
   cleanup:
     name: cleanup
     if: always() && needs.preflight.result != 'skipped'
-    needs: [preflight, build, test, llm-review, deliver-package]
+    needs: [preflight, unit-test, build, test, llm-review, deliver-package]
     runs-on: [self-hosted, linux, nso]
     timeout-minutes: 5
     steps:
