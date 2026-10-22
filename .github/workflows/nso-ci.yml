@@ -55,7 +55,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Python unittest
         run: python3 -m unittest discover -s tests/unit -v
@@ -70,7 +70,7 @@ jobs:
       tarball: ${{ steps.build.outputs.name }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: サービスパッケージのビルド (Build イメージで make)
         id: build
@@ -81,7 +81,7 @@ jobs:
           echo "### build: \`$(basename "$tarball")\`" >> "$GITHUB_STEP_SUMMARY"
 
       - name: ビルド済みパッケージのアップロード (後続ジョブ用)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: l3vpn-package-${{ github.run_id }}-${{ github.run_attempt }}-build
           path: ${{ steps.build.outputs.tarball }}
@@ -97,13 +97,13 @@ jobs:
       NETSIM_PASSWORD: ${{ secrets.NETSIM_PASSWORD }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Python 環境の準備
         uses: ./.github/actions/python-env
 
       - name: ビルド済みパッケージのダウンロード
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact }}-build
           path: dist/
@@ -118,7 +118,7 @@ jobs:
 
       - name: テスト結果のアップロード
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: nso-ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/
@@ -131,13 +131,13 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Python 環境の準備
         uses: ./.github/actions/python-env
 
       - name: テスト結果のダウンロード
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: nso-ci-test-results-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/
@@ -157,7 +157,7 @@ jobs:
 
       - name: PR にレビュー結果をコメント
         if: always() && github.event_name == 'pull_request' && hashFiles('artifacts/llm_review.md') != ''
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -175,7 +175,7 @@ jobs:
 
       - name: レビュー結果のアップロード
         if: always() && hashFiles('artifacts/llm_review.md') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: llm-review-${{ github.run_id }}-${{ github.run_attempt }}
           path: artifacts/llm_review.md
@@ -191,7 +191,7 @@ jobs:
       actions: write   # delete-merged removes the temporary -build artifact
     steps:
       - name: レビュー済みパッケージとして登録 (仮の -build 成果物は削除)
-        uses: actions/upload-artifact/merge@v4
+        uses: actions/upload-artifact/merge@v7
         with:
           name: ${{ needs.build.outputs.artifact }}
           pattern: ${{ needs.build.outputs.artifact }}-build
