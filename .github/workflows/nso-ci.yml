@@ -14,7 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NSO_IMAGE: ${{ vars.NSO_IMAGE || 'cisco-nso-prod:6.7' }}
+  # Packages are compiled with the Build Image and run on the Production Image.
+  NSO_BUILD_IMAGE: ${{ vars.NSO_BUILD_IMAGE || 'cisco-nso-build:6.7.4' }}
+  NSO_IMAGE: ${{ vars.NSO_IMAGE || 'cisco-nso-prod:6.7.4' }}
   NSO_NED_TARBALL: ${{ vars.NSO_NED_TARBALL }}
   NSO_CI_ID: ${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -41,7 +43,9 @@ jobs:
           for s in NETSIM_USERNAME NETSIM_PASSWORD CIRCUIT_CLIENT_ID CIRCUIT_CLIENT_SECRET CIRCUIT_APP_KEY; do
             v="HAS_$s"; [ "${!v}" = "true" ] || { echo "::error::Repository secret $s is not set"; ok=false; }
           done
-          docker image inspect "$NSO_IMAGE" --format '{{.RepoTags}} {{.Created}}' || { echo "::error::Docker image $NSO_IMAGE not found on runner"; ok=false; }
+          for image in "$NSO_BUILD_IMAGE" "$NSO_IMAGE"; do
+            docker image inspect "$image" --format '{{.RepoTags}} {{.Created}}' || { echo "::error::Docker image $image not found on runner"; ok=false; }
+          done
           $ok
 
   unit-test:
@@ -68,7 +72,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: サービスパッケージのビルド (NSO コンテナ内で make)
+      - name: サービスパッケージのビルド (Build イメージで make)
         id: build
         run: |
           tarball=$(ci/build_package.sh packages/l3vpn "$HOME/nso-ci-work/$NSO_CI_ID-build" dist | tail -n 1)
@@ -84,7 +88,7 @@ jobs:
           retention-days: 1
 
   test:
-    name: test (NSO 6.7 / netsim / Robot)
+    name: test (NSO prod image / netsim / Robot)
     needs: build
     runs-on: [self-hosted, linux, nso]
     timeout-minutes: 30
