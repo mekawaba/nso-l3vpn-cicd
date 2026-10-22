@@ -1,5 +1,6 @@
 *** Settings ***
-Documentation     L3VPN service package CI test on NSO 6.7 container with IOS XR netsim.
+Documentation     L3VPN service package CI test on the NSO 6.7.4 Production Image with IOS XR netsim.
+...               The package tarball is built beforehand with the Build Image (ci/build_package.sh).
 ...               No expected device config is kept here: the tests only check that
 ...               the service objects exist. Value-level review is done by the LLM.
 Library           libraries/NsoCiLibrary.py    ${PARAMS_FILE}    ${ARTIFACTS_DIR}    AS    NSO

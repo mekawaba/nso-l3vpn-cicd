@@ -2,7 +2,7 @@
 
 Runtime settings are read from environment variables:
 
-  NSO_IMAGE         NSO production image (default: cisco-nso-prod:6.7)
+  NSO_IMAGE         NSO Production Image for NSO and netsim (default: cisco-nso-prod:6.7.4)
   NSO_NED_TARBALL   Path to the IOS XR NED tarball on the runner (required)
   NETSIM_USERNAME   netsim login user (required)
   NETSIM_PASSWORD   netsim login password (required)
@@ -45,7 +45,7 @@ class NsoCiLibrary:
         self.artifacts = Path(artifacts_dir)
         self.artifacts.mkdir(parents=True, exist_ok=True)
 
-        self.image = os.environ.get("NSO_IMAGE", "cisco-nso-prod:6.7")
+        self.image = os.environ.get("NSO_IMAGE", "cisco-nso-prod:6.7.4")
         ci_id = re.sub(r"[^A-Za-z0-9_.-]", "-", os.environ.get("NSO_CI_ID", "local"))
         self.prefix = f"nso-ci-{ci_id}"
         self.nso = f"{self.prefix}-nso"
